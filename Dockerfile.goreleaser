@@ -1,0 +1,15 @@
+FROM alpine:3.23.4
+
+RUN apk add --no-cache ca-certificates tzdata libcap \
+    && adduser -D -H -s /sbin/nologin dnsProxy
+
+COPY dns-aa-proxy /usr/local/bin/dns-aa-proxy
+
+RUN setcap 'cap_net_bind_service=+ep' /usr/local/bin/dns-aa-proxy \
+    && apk del libcap
+
+USER dnsProxy
+
+EXPOSE 53/udp 53/tcp
+
+ENTRYPOINT ["dns-aa-proxy"]
