@@ -88,7 +88,10 @@ func parseLogLevel(raw string) slog.Level {
 	}
 }
 
-func isClusterPeer(cfg *Config, addr string) bool {
+func isClusterPeer(cfg *Config, addr string, mu *sync.Mutex) bool {
+	mu.Lock()
+	defer mu.Unlock()
+
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false
@@ -134,7 +137,7 @@ func isZoneTransferOrNotify(r *dns.Msg) bool {
 	return false
 }
 
-func makeHandler(cfg *Config) dns.HandlerFunc {
+func makeHandler(cfg *Config, mu *sync.Mutex) dns.HandlerFunc {
 	return func(w dns.ResponseWriter, r *dns.Msg) {
 		clientAddr := w.RemoteAddr().String()
 		host, _, _ := net.SplitHostPort(clientAddr)
@@ -148,7 +151,7 @@ func makeHandler(cfg *Config) dns.HandlerFunc {
 
 		logger := slog.With("client", host, "qname", qname, "qtype", qtype)
 
-		peer := isClusterPeer(cfg, clientAddr)
+		peer := isClusterPeer(cfg, clientAddr, mu)
 		clusterOp := isZoneTransferOrNotify(r)
 
 		// Cluster peers and zone-transfer/NOTIFY ops are always passed through
@@ -199,6 +202,8 @@ func makeHandler(cfg *Config) dns.HandlerFunc {
 func main() {
 	cfg := loadConfig()
 
+	mu := sync.Mutex{}
+
 	// Configure structured logging
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})
 	slog.SetDefault(slog.New(handler))
@@ -214,7 +219,7 @@ func main() {
 		slog.Info("cluster peer registered", "peer", peer)
 	}
 
-	h := makeHandler(&cfg)
+	h := makeHandler(&cfg, &mu)
 
 	var wg sync.WaitGroup
 	wg.Add(2)

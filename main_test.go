@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,6 +49,8 @@ func TestIsClusterPeer(t *testing.T) {
 		},
 	}
 
+	mu := sync.Mutex{}
+
 	tests := []struct {
 		addr string
 		want bool
@@ -63,7 +66,7 @@ func TestIsClusterPeer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.addr, func(t *testing.T) {
-			got := isClusterPeer(cfg, tt.addr)
+			got := isClusterPeer(cfg, tt.addr, &mu)
 			if got != tt.want {
 				t.Errorf("isClusterPeer(%q) = %v, want %v", tt.addr, got, tt.want)
 			}
@@ -167,7 +170,8 @@ func TestProxyIntegration(t *testing.T) {
 		Timeout:      2 * time.Second,
 	}
 
-	h := makeHandler(cfg)
+	mu := sync.Mutex{}
+	h := makeHandler(cfg, &mu)
 
 	// Start proxy on a random port
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -200,7 +204,9 @@ func TestProxyIntegration(t *testing.T) {
 	// (from 127.0.0.1 which is a cluster peer, so it'll be bypassed)
 	// We need to test from a non-peer perspective... but since we're
 	// on localhost and 127.0.0.1 is in peers, let's remove it.
+	mu.Lock()
 	cfg.ClusterPeers = map[string]bool{} // clear peers
+	mu.Unlock()
 
 	m2 := new(dns.Msg)
 	m2.SetQuestion("recursive.example.com.", dns.TypeA)
@@ -213,7 +219,10 @@ func TestProxyIntegration(t *testing.T) {
 	}
 
 	// Test 3: Same non-auth query but as a cluster peer → should pass through
+	mu.Lock()
 	cfg.ClusterPeers = map[string]bool{"127.0.0.1": true}
+	mu.Unlock()
+	h = makeHandler(cfg, &mu)
 	m3 := new(dns.Msg)
 	m3.SetQuestion("recursive.example.com.", dns.TypeA)
 	resp3, _, err := c.Exchange(m3, proxyAddr)
